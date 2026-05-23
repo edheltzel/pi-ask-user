@@ -1,5 +1,15 @@
 # Changelog
 
+## [0.11.1](https://github.com/edlsh/pi-ask-user/releases/tag/v0.11.1) - 2026-05-23
+
+### Fixed
+
+- Crash with `Theme not initialized. Call initTheme() first.` on hosts still using the legacy `@mariozechner/pi-coding-agent` scope (Pi ≤ 0.73.1). When npm cannot dedupe across package scopes the extension brings its own copy of `@earendil-works/pi-coding-agent`, whose theme singleton is never initialised; pi-tui's `Markdown.render` then threw on the first `theme.bold` access. The existing `try { getMarkdownTheme() } catch {}` guard never fired because the bag of closures returned by `getMarkdownTheme` only proxies the singleton lazily. A new `safeMarkdownTheme()` helper now eagerly probes `bold("")` and falls back to plain `Text` rendering when the probe throws. Closes #17.
+
+### Changed
+
+- Tightened `peerDependencies` on `@earendil-works/pi-coding-agent` and `@earendil-works/pi-tui` from `"*"` to `">=0.74.0"` so npm refuses to install this version against legacy `@mariozechner/*` hosts at install time instead of crashing at render time
+
 ## [0.11.0](https://github.com/edlsh/pi-ask-user/releases/tag/v0.11.0) - 2026-05-09
 
 ### Added

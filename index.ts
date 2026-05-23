@@ -52,6 +52,36 @@ function StringEnum<const T extends readonly string[]>(
    });
 }
 
+/**
+ * `getMarkdownTheme()` returns a bag of closures that read through a Proxy
+ * over the host's theme singleton. The Proxy only throws on property access,
+ * not when the bag itself is constructed — so a naive
+ * `try { getMarkdownTheme() } catch {}` silently lets a broken bag escape
+ * and crashes mid-render the first time pi-tui's Markdown calls
+ * `mdTheme.bold(...)`.
+ *
+ * That broken-bag scenario shows up whenever this extension's bundled copy
+ * of `@earendil-works/pi-coding-agent` is a different module instance than
+ * the host's — e.g. an older Pi still on the legacy
+ * `@mariozechner/pi-coding-agent` scope (≤ 0.73.1) where npm cannot dedupe
+ * across scopes, so our copy's theme singleton is never initialised
+ * (`globalThis[Symbol.for("@earendil-works/pi-coding-agent:theme")]` is
+ * undefined). See https://github.com/edlsh/pi-ask-user/issues/17.
+ *
+ * Probe `bold("")` to force the Proxy lookup eagerly; on throw, callers
+ * fall back to plain `Text` rendering for context blocks.
+ */
+function safeMarkdownTheme(): MarkdownTheme | undefined {
+   try {
+      const md = getMarkdownTheme();
+      if (!md) return undefined;
+      md.bold("");
+      return md;
+   } catch {
+      return undefined;
+   }
+}
+
 type AskOptionInput = QuestionOption | string;
 
 type AskDisplayMode = "overlay" | "inline";
@@ -785,10 +815,7 @@ class WrappedSingleSelectList implements Component {
    private buildPreviewLines(width: number, filteredOptions: QuestionOption[], maxLines: number): string[] {
       if (maxLines <= 0) return [];
 
-      let mdTheme: MarkdownTheme | undefined;
-      try {
-         mdTheme = getMarkdownTheme();
-      } catch { }
+      const mdTheme = safeMarkdownTheme();
 
       let md = "";
 
@@ -1042,10 +1069,7 @@ class AskComponent extends Container {
 
       if (this.context) {
          this.addChild(new Spacer(1));
-         let mdTheme: MarkdownTheme | undefined;
-         try {
-            mdTheme = getMarkdownTheme();
-         } catch { }
+         const mdTheme = safeMarkdownTheme();
          if (mdTheme) {
             this.contextComponent = new Markdown("", 1, 0, mdTheme);
          } else {

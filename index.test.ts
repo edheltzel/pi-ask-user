@@ -72,9 +72,30 @@ function createKeybindings(overrides: Partial<Record<string, string[]>> = {}) {
 }
 
 beforeAll(() => {
+   // Model the failure mode from https://github.com/edlsh/pi-ask-user/issues/17.
+   // `getMarkdownTheme()` returns a bag of closures that read through a Proxy
+   // over the host's theme singleton. When the extension's bundled copy of
+   // `@earendil-works/pi-coding-agent` is a different module instance than
+   // the host's (e.g. legacy `@mariozechner/*` host ≤ Pi 0.73.1, where npm
+   // cannot dedupe across scopes), our copy's singleton is never initialised
+   // and any property read throws "Theme not initialized. Call initTheme()
+   // first." Constructing the bag itself succeeds; the throw surfaces lazily
+   // on `mdTheme.bold(...)` from inside pi-tui's `Markdown.render`. The
+   // extension MUST detect this and fall back to plain `Text` rendering.
+   const uninitialisedTheme = new Proxy({}, {
+      get(_target, prop) {
+         throw new Error(`Theme not initialized. Call initTheme() first. (read ${String(prop)})`);
+      },
+   });
+   const brokenMarkdownTheme = {
+      bold: (text: string) => (uninitialisedTheme as any).bold(text),
+      italic: (text: string) => (uninitialisedTheme as any).italic(text),
+      heading: (text: string) => (uninitialisedTheme as any).fg("mdHeading", text),
+   };
+
    mock.module("@earendil-works/pi-coding-agent", () => ({
       DynamicBorder: class { },
-      getMarkdownTheme: () => undefined,
+      getMarkdownTheme: () => brokenMarkdownTheme,
       rawKeyHint: (key: string, description: string) => `${key} ${description}`,
    }));
 
@@ -93,7 +114,19 @@ beforeAll(() => {
          shift: (key: string) => `shift+${key}`,
          tab: "tab",
       },
-      Markdown: class extends MockText { },
+      Markdown: class extends MockText {
+         private mdTheme: any;
+         constructor(text: string, _a: number, _b: number, theme: any) {
+            super(text);
+            this.mdTheme = theme;
+         }
+         render() {
+            // Mirror pi-tui Markdown.render: invoke theme.bold during render
+            // so #17-style regressions surface as render-time crashes in
+            // tests instead of silently passing.
+            return super.render().map((line) => this.mdTheme.bold(line));
+         }
+      },
       matchesKey: (data: string, key: string) => data === key,
       Spacer: class { },
       Text: MockText,
@@ -1651,6 +1684,72 @@ describe("ask_user", () => {
          comment: "Roll out both behind the same flag.",
       });
       expect(result.details.cancelled).toBe(false);
+   });
+
+
+   test("does not crash when host theme singleton is uninitialised (regression for #17)", async () => {
+      // The shared `getMarkdownTheme` mock above returns a bag of closures
+      // that throw on every property read of the underlying theme proxy,
+      // mirroring what happens on pre-rename hosts where our bundled copy of
+      // pi-coding-agent has its own (uninitialised) `globalThis` slot. The
+      // `Markdown` mock above also calls `theme.bold` during render. So if
+      // the extension ever stops gating through `safeMarkdownTheme()`, the
+      // throw surfaces at one of the two callsites: the constructor's
+      // context branch, or the split-pane preview built by
+      // `buildPreviewLines` — both must remain quiet.
+      const tool = await setupTool();
+      let constructionError: unknown;
+      let previewError: unknown;
+      let preview = "";
+
+      await tool.execute(
+         "tool-call-id",
+         {
+            question: "Pick one",
+            context: "Some **markdown** context",
+            options: [
+               { title: "Alpha", description: "First **emphasised** option" },
+               { title: "Beta", description: "Second option" },
+            ],
+         },
+         undefined,
+         undefined,
+         {
+            hasUI: true,
+            ui: {
+               custom: async (factory: any) => {
+                  let component: any;
+                  try {
+                     component = factory(
+                        { requestRender() { }, terminal: { rows: 24 } },
+                        createTheme(),
+                        createKeybindings(),
+                        () => { },
+                     );
+                  } catch (err) {
+                     constructionError = err;
+                     return null;
+                  }
+                  try {
+                     // Width 120 forces the split-pane preview, which is the
+                     // path that constructs and renders the Markdown
+                     // component over the option description.
+                     preview = (component.singleSelectList as any).render(120).join("\n");
+                  } catch (err) {
+                     previewError = err;
+                  }
+                  return null;
+               },
+            },
+         },
+      );
+
+      expect(constructionError).toBeUndefined();
+      expect(previewError).toBeUndefined();
+      // Confirm the raw markdown fell through to plain Text rendering rather
+      // than getting silently dropped when the theme proxy was unavailable.
+      expect(preview).toContain("## Alpha");
+      expect(preview).toContain("First **emphasised** option");
    });
 
 
