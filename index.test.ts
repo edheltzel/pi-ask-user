@@ -130,6 +130,7 @@ beforeAll(() => {
 
    mock.module("@earendil-works/pi-tui", () => ({
       Container: MockContainer,
+      CURSOR_MARKER: "\x1b_pi:c\x07",
       Editor: MockEditor,
       Key: {
          escape: "escape",
@@ -1589,6 +1590,53 @@ describe("ask_user", () => {
       expect(joined).toContain("editor line 4");
       expect(joined).toContain("editor line 5");
       expect(joined).toContain("enter submit");
+   });
+
+   test("routes PageUp/PageDown to the editor in freeform mode instead of prompt scrolling", async () => {
+      const tool = await setupTool();
+      editorInputs = [];
+
+      const question = Array.from({ length: 18 }, (_, index) => `Question line ${index}`).join("\n");
+
+      const result = await tool.execute(
+         "tool-call-id",
+         {
+            question,
+            context: "Long overlay context so the prompt pane has scrollable overflow.",
+            options: ["Alpha", "Beta"],
+            allowFreeform: true,
+         },
+         undefined,
+         undefined,
+         {
+            hasUI: true,
+            ui: {
+               custom: async (factory: any) => {
+                  const component = factory(
+                     { requestRender() { }, terminal: { rows: 12 } },
+                     createTheme(),
+                     createKeybindings(),
+                     () => { },
+                  );
+                  // Render once so the prompt pane computes a scrollable overflow.
+                  component.render(50);
+                  // Enter freeform mode (last option is the freeform sentinel).
+                  component.handleInput("down");
+                  component.handleInput("down");
+                  component.handleInput("enter");
+                  component.render(50);
+                  // These must reach the editor, not the prompt-scroll intercept.
+                  component.handleInput("pageUp");
+                  component.handleInput("pageDown");
+                  return null;
+               },
+            },
+         },
+      );
+
+      expect(result.isError).not.toBe(true);
+      expect(editorInputs).toContain("pageUp");
+      expect(editorInputs).toContain("pageDown");
    });
 
    test("does not apply overlay viewport clipping in inline mode", async () => {

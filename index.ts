@@ -11,6 +11,7 @@ import { Type, type TUnsafe } from "@sinclair/typebox";
 import {
    Container,
    type Component,
+   CURSOR_MARKER,
    decodeKittyPrintable,
    Editor,
    type EditorTheme,
@@ -1289,7 +1290,12 @@ class AskComponent extends Container {
 
       const contentLines = lines.slice(1, -1);
       const contentBudget = safeBudget - 2;
-      const cursorLineIndex = contentLines.findIndex((line) => line.includes("\x1b[7m"));
+      // Locate the cursor row: prefer the zero-width CURSOR_MARKER the editor
+      // emits while focused (the same mechanism pi-tui core uses for hardware
+      // cursor placement), falling back to the inverse-video fake cursor.
+      const cursorLineIndex = contentLines.findIndex(
+         (line) => line.includes(CURSOR_MARKER) || line.includes("\x1b[7m"),
+      );
       const maxStart = Math.max(0, contentLines.length - contentBudget);
       const start = cursorLineIndex >= 0
          ? Math.max(0, Math.min(cursorLineIndex - contentBudget + 1, maxStart))
@@ -1443,7 +1449,6 @@ class AskComponent extends Container {
             keybindingHint(theme, this.keybindings, "tui.input.submit", this.mode === "comment" ? "submit/skip" : "submit"),
             keybindingHint(theme, this.keybindings, "tui.input.newLine", "newline"),
             literalHint(theme, "esc", "back"),
-            promptScrollHint,
             overlayHint,
             alternateCancelKeys.length > 0 ? literalHint(theme, formatKeyList(alternateCancelKeys), "cancel") : null,
          ]
@@ -1656,10 +1661,13 @@ class AskComponent extends Container {
 
    private handlePromptScrollInput(data: string): boolean {
       if (this.displayMode !== "overlay" || this.promptMaxScrollOffset <= 0) return false;
+      // Prompt scrolling is select-mode only: in freeform/comment modes the
+      // editor owns PageUp/PageDown (tui.editor.pageUp/pageDown) for paging
+      // through long input, so intercepting them here would steal editor keys.
+      if (this.mode !== "select") return false;
 
       const pageRows = Math.max(1, this.promptViewportRows - 1);
       const halfPageRows = Math.max(1, Math.floor(this.promptViewportRows / 2));
-      const selectModeOnly = this.mode === "select";
       let handled = false;
 
       if (matchesKey(data, PROMPT_SCROLL_PAGE_UP_KEY)) {
@@ -1668,16 +1676,16 @@ class AskComponent extends Container {
       } else if (matchesKey(data, PROMPT_SCROLL_PAGE_DOWN_KEY)) {
          handled = true;
          this.setPromptScrollOffset(this.promptScrollOffset + pageRows);
-      } else if (selectModeOnly && matchesKey(data, PROMPT_SCROLL_HOME_KEY)) {
+      } else if (matchesKey(data, PROMPT_SCROLL_HOME_KEY)) {
          handled = true;
          this.setPromptScrollOffset(0);
-      } else if (selectModeOnly && matchesKey(data, PROMPT_SCROLL_END_KEY)) {
+      } else if (matchesKey(data, PROMPT_SCROLL_END_KEY)) {
          handled = true;
          this.setPromptScrollOffset(this.promptMaxScrollOffset);
-      } else if (selectModeOnly && matchesKey(data, PROMPT_SCROLL_HALF_PAGE_UP_KEY)) {
+      } else if (matchesKey(data, PROMPT_SCROLL_HALF_PAGE_UP_KEY)) {
          handled = true;
          this.setPromptScrollOffset(this.promptScrollOffset - halfPageRows);
-      } else if (selectModeOnly && matchesKey(data, PROMPT_SCROLL_HALF_PAGE_DOWN_KEY)) {
+      } else if (matchesKey(data, PROMPT_SCROLL_HALF_PAGE_DOWN_KEY)) {
          handled = true;
          this.setPromptScrollOffset(this.promptScrollOffset + halfPageRows);
       }
