@@ -2015,6 +2015,145 @@ describe("ask_user", () => {
    });
 
 
+
+   describe("issue #22 option normalization", () => {
+      test("salvages common option title aliases when schema proxies mangle the shape", async () => {
+         const tool = await setupTool();
+         let selectOptions: string[] = [];
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick one",
+               options: [
+                  { label: "A" },
+                  { text: "B" },
+                  { value: "C" },
+                  { name: "D" },
+                  { option: "E" },
+               ],
+               allowFreeform: false,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async (_title: string, opts: string[]) => {
+                     selectOptions = opts;
+                     return "C";
+                  },
+                  input: async () => undefined,
+               },
+            },
+         );
+
+         expect(selectOptions).toEqual(["A", "B", "C", "D", "E"]);
+         expect(result.details.response).toEqual({ kind: "selection", selections: ["C"] });
+         expect(result.details.options.map((option: { title: string }) => option.title)).toEqual(["A", "B", "C", "D", "E"]);
+      });
+
+      test("filters blank labels, coerces primitive options, and keeps only non-blank descriptions", async () => {
+         const tool = await setupTool();
+         let selectOptions: string[] = [];
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick one",
+               options: [
+                  "  ",
+                  "",
+                  42,
+                  true,
+                  "Real",
+                  { title: "A", description: "  " },
+                  { label: "B", description: "why" },
+               ],
+               allowFreeform: false,
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => undefined,
+                  select: async (_title: string, opts: string[]) => {
+                     selectOptions = opts;
+                     return "B";
+                  },
+                  input: async () => undefined,
+               },
+            },
+         );
+
+         expect(selectOptions).toEqual(["42", "true", "Real", "A", "B"]);
+         expect(result.details.options).toEqual([
+            { title: "42" },
+            { title: "true" },
+            { title: "Real" },
+            { title: "A" },
+            { title: "B", description: "why" },
+         ]);
+      });
+
+      test("returns an error instead of opening UI when every supplied option is malformed", async () => {
+         const tool = await setupTool();
+         let calls = 0;
+
+         const result = await tool.execute(
+            "tool-call-id",
+            {
+               question: "Pick one",
+               options: [{}, { foo: "x" }, "   "],
+            },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => {
+                     calls += 1;
+                     return undefined;
+                  },
+                  select: async () => {
+                     calls += 1;
+                     return undefined;
+                  },
+                  input: async () => {
+                     calls += 1;
+                     return undefined;
+                  },
+               },
+            },
+         );
+
+         const text = result.content.map((part: { text?: string }) => part.text ?? "").join("\n");
+         expect(result.isError).toBe(true);
+         expect(text).toContain("option(s) were malformed");
+         expect(text).toContain("{ \"title\": \"Short label\", \"description\": \"Optional detail\" }");
+         expect(result.details.error).toBe("Malformed options: no entry had a usable title");
+         expect(calls).toBe(0);
+      });
+
+      test("keeps the registered options schema flat without union combinators", async () => {
+         const source = await Bun.file("index.ts").text();
+         const start = source.indexOf("options: Type.Optional(");
+         const end = source.indexOf("allowMultiple: Type.Optional(", start);
+         const optionSchema = source.slice(start, end);
+
+         expect(start).toBeGreaterThanOrEqual(0);
+         expect(end).toBeGreaterThan(start);
+         expect(optionSchema).toContain("Type.Array(");
+         expect(optionSchema).toContain("Type.Object({");
+         expect(optionSchema).toContain("title: Type.String");
+         expect(optionSchema).not.toContain("Type.Union");
+         expect(optionSchema).not.toContain("anyOf");
+         expect(optionSchema).not.toContain("oneOf");
+      });
+   });
+
    describe("RPC fallback (custom() returns undefined)", () => {
       test("single-select falls back to ctx.ui.select()", async () => {
          const tool = await setupTool();

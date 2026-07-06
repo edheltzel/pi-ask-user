@@ -61,7 +61,7 @@ The registered tool name is:
 |-----------|------|---------|-------------|
 | `question` | `string` | *required* | The question to ask the user |
 | `context` | `string?` | — | Relevant context summary shown before the question |
-| `options` | `(string \| {title, description?})[]?` | `[]` | Multiple-choice options |
+| `options` | `{title, description?}[]?` | `[]` | Multiple-choice options. The schema is a flat object shape (no `anyOf`, which some provider proxies strip or reject); plain strings and common alias keys (`label`, `text`, `value`, `name`, `option`) are still accepted at runtime |
 | `allowMultiple` | `boolean?` | `false` | Enable multi-select mode |
 | `allowFreeform` | `boolean?` | `true` | Add a "Type something" freeform option |
 | `allowComment` | `boolean?` | `false` | Expose a user-toggleable extra-context option in the custom UI (`ctrl+g` or the toggle row) and collect an optional comment in fallback dialogs |
@@ -77,7 +77,7 @@ The registered tool name is:
   "question": "Which option should we use?",
   "context": "We are choosing a deploy target.",
   "options": [
-    "staging",
+    { "title": "staging" },
     { "title": "production", "description": "Customer-facing" }
   ],
   "allowMultiple": false,
