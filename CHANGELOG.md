@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.12.0](https://github.com/edlsh/pi-ask-user/releases/tag/v0.12.0) - 2026-07-06
+
+### Fixed
+
+- `ask_user` failing under schema-mangling hosts/proxies (cmux, Google function calling, Codex-style backends) that strip or reject the `anyOf` union in the `options` items schema. Models behind such proxies could not see the option shape, guessed keys like `{ "text": … }` or sent empty objects, and every option was silently dropped — the tool then fell into an empty freeform prompt that ended in `Cancelled`. Closes #22. Three changes:
+  - The `options` schema is now a flat `{ title, description? }` object array with no `anyOf`, so every provider sees a concrete shape. Plain strings remain accepted at runtime.
+  - Option normalization now salvages common alias keys (`label`, `text`, `value`, `name`, `option`) and coerces primitive entries, instead of dropping anything without a `title`.
+  - When every option is malformed, the tool returns an error result telling the model the expected shape so it can retry, instead of silently showing a freeform prompt.
+
 ## [0.11.2](https://github.com/edlsh/pi-ask-user/releases/tag/v0.11.2) - 2026-06-03
 
 ### Changed

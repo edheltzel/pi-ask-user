@@ -23,13 +23,14 @@ import {
    type MarkdownTheme,
    matchesKey,
    type OverlayHandle,
+   type OverlayOptions,
    Spacer,
    Text,
    type TUI,
    truncateToWidth,
    wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
-import { renderSingleSelectRows } from "./single-select-layout";
+import { renderSingleSelectRows, type QuestionOption } from "./single-select-layout";
 
 import { createRequire } from "node:module";
 const _require = createRequire(import.meta.url);
@@ -121,18 +122,28 @@ interface AskToolDetails {
 
 type AskUIResult = AskResponse;
 
-function normalizeOptions(options: AskOptionInput[]): QuestionOption[] {
-   return options
-      .map((option) => {
-         if (typeof option === "string") {
-            return { title: option };
+// Key aliases models fall back to when a schema-mangling proxy (Google
+// function calling, Codex-style backends, cmux) strips the option shape and
+// the model has to guess. See issue #22.
+const OPTION_TITLE_KEYS = ["title", "label", "text", "value", "name", "option"] as const;
+
+function coerceOption(option: unknown): QuestionOption | null {
+   if (typeof option === "string" || typeof option === "number" || typeof option === "boolean") {
+      const title = String(option).trim();
+      return title ? { title } : null;
+   }
+   if (option && typeof option === "object") {
+      const record = option as Record<string, unknown>;
+      for (const key of OPTION_TITLE_KEYS) {
+         const value = record[key];
+         if (typeof value === "string" && value.trim()) {
+            const description =
+               typeof record.description === "string" && record.description.trim() ? record.description : undefined;
+            return description ? { title: value.trim(), description } : { title: value.trim() };
          }
-         if (option && typeof option === "object" && typeof option.title === "string") {
-            return { title: option.title, description: option.description };
-         }
-         return null;
-      })
-      .filter((option): option is QuestionOption => option !== null);
+      }
+   }
+   return null;
 }
 
 function formatOptionsForMessage(options: QuestionOption[]): string {
@@ -390,7 +401,7 @@ function matchesSelectDown(data: string, keybindings: KeybindingsManager): boole
 function buildCustomUIOptions(
    displayMode: AskDisplayMode,
    onHandle?: (handle: OverlayHandle) => void,
-) {
+): { overlay?: boolean; overlayOptions?: OverlayOptions; onHandle?: (handle: OverlayHandle) => void } | undefined {
    switch (displayMode) {
       case "inline":
          return undefined;
@@ -1817,15 +1828,17 @@ export default function(pi: ExtensionAPI) {
          ),
          options: Type.Optional(
             Type.Array(
-               Type.Union([
-                  Type.String({ description: "Short title for this option" }),
-                  Type.Object({
-                     title: Type.String({ description: "Short title for this option" }),
-                     description: Type.Optional(
-                        Type.String({ description: "Longer description explaining this option" }),
-                     ),
-                  }),
-               ]),
+               // Flat object shape: union item schemas get stripped or rejected
+               // by several providers/proxies (Google function calling,
+               // Codex-style backends, cmux), leaving the model to guess the shape
+               // and produce empty options. Plain strings are still accepted at
+               // runtime for older transcripts. See issue #22.
+               Type.Object({
+                  title: Type.String({ description: "Short title for this option" }),
+                  description: Type.Optional(
+                     Type.String({ description: "Longer description explaining this option" }),
+                  ),
+               }),
                { description: "List of options for the user to choose from" },
             ),
          ),
@@ -1896,8 +1909,24 @@ export default function(pi: ExtensionAPI) {
                DEFAULT_COMMENT_TOGGLE_KEY,
             ),
          };
-         const options = normalizeOptions(rawOptions);
+         const options = rawOptions.map(coerceOption).filter((option): option is QuestionOption => option !== null);
          const normalizedContext = context?.trim() || undefined;
+
+         if (rawOptions.length > 0 && options.length === 0) {
+            return {
+               content: [
+                  {
+                     type: "text",
+                     text:
+                        `All ${rawOptions.length} option(s) were malformed, so nothing could be shown to the user. `
+                        + `Each option must be a plain string or an object like { "title": "Short label", "description": "Optional detail" }. `
+                        + `Call ask_user again with corrected options.`,
+                  },
+               ],
+               isError: true,
+               details: { error: "Malformed options: no entry had a usable title" },
+            };
+         }
 
          if (!ctx.hasUI || !ctx.ui) {
             const optionText = options.length > 0 ? `\n\nOptions:\n${formatOptionsForMessage(options)}` : "";
@@ -2049,9 +2078,7 @@ export default function(pi: ExtensionAPI) {
          let text = theme.fg("toolTitle", theme.bold("ask_user "));
          text += theme.fg("muted", question);
          if (rawOptions.length > 0) {
-            const labels = rawOptions.map((o: unknown) =>
-               typeof o === "string" ? o : (o as QuestionOption)?.title ?? "",
-            );
+            const labels = rawOptions.map((o: unknown) => coerceOption(o)?.title ?? "<invalid>");
             text += "\n" + theme.fg("dim", `  ${rawOptions.length} option(s): ${labels.join(", ")}`);
          }
          if (args.allowMultiple) {
@@ -2072,8 +2099,7 @@ export default function(pi: ExtensionAPI) {
 
          if (options.isPartial) {
             const waitingText = result.content
-               ?.filter((part: { type?: string; text?: string }) => part?.type === "text")
-               .map((part: { text?: string }) => part.text ?? "")
+               ?.map((part) => part.type === "text" ? part.text : "")
                .join("\n")
                .trim() || "Waiting for user input...";
             return new Text(theme.fg("muted", waitingText), 0, 0);
