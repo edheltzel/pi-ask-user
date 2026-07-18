@@ -1,6 +1,6 @@
 {
   "name": "pi-ask-user",
-  "version": "0.13.0",
+  "version": "0.13.0-herdr.1",
   "description": "Interactive ask_user tool for pi-coding-agent with searchable split-pane selection UI, multi-select, and freeform input",
   "type": "module",
   "keywords": [
@@ -10,18 +10,19 @@
     "extension",
     "ask",
     "ask_user",
-    "interactive"
+    "interactive",
+    "herdr"
   ],
   "author": "Enzo Lucchesi <enzo@edl.sh>",
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/edlsh/pi-ask-user.git"
+    "url": "git+https://github.com/edheltzel/pi-ask-user.git"
   },
   "bugs": {
-    "url": "https://github.com/edlsh/pi-ask-user/issues"
+    "url": "https://github.com/edheltzel/pi-ask-user/issues"
   },
-  "homepage": "https://github.com/edlsh/pi-ask-user#readme",
+  "homepage": "https://github.com/edheltzel/pi-ask-user#readme",
   "publishConfig": {
     "access": "public"
   },
@@ -35,12 +36,14 @@
   },
   "files": [
     "index.ts",
+    "herdr.ts",
     "single-select-layout.ts",
     "skills",
     "README.md",
     "LICENSE"
   ],
   "scripts": {
+    "test": "bun test",
     "check": "npm pack --dry-run"
   },
   "peerDependencies": {

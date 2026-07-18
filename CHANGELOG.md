@@ -1,5 +1,16 @@
 # Changelog
 
+## [0.13.0-herdr.1](https://github.com/edheltzel/pi-ask-user/releases/tag/v0.13.0-herdr.1) - 2026-07-18
+
+### Added
+
+- Optional Herdr lifecycle and pane metadata integration when `HERDR_ENV=1`, `HERDR_SOCKET_PATH`, and `HERDR_PANE_ID` are present. Interactive waits now emit matching blocked/unblocked events and report/clear an `ask: "❓1"` token through a short, bounded, best-effort Unix socket adapter.
+- Focused integration and adapter tests covering disabled behavior, both interactive branches, cancellation/error cleanup, idempotence, report/clear ordering, and the real Unix socket transport.
+
+### Changed
+
+- This Atlas-maintained fork now identifies its repository as `edheltzel/pi-ask-user` while retaining upstream MIT licensing and authorship.
+
 ## [0.13.0](https://github.com/edlsh/pi-ask-user/releases/tag/v0.13.0) - 2026-07-12
 
 ### Added

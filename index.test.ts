@@ -1,4 +1,4 @@
-import { beforeAll, describe, expect, mock, onTestFinished, test } from "bun:test";
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, mock, onTestFinished, test } from "bun:test";
 
 let editorInputs: string[] = [];
 let editorText = "";
@@ -217,6 +217,16 @@ function stubEnv(key: string, value: string): void {
    });
 }
 
+function enableHerdr(): void {
+   process.env.HERDR_ENV = "1";
+   process.env.HERDR_SOCKET_PATH = `/tmp/pi-ask-user-test-${crypto.randomUUID()}.sock`;
+   process.env.HERDR_PANE_ID = "pane-test";
+}
+
+function herdrEvents(): Array<{ name: string; payload: any }> {
+   return emittedEvents.filter((event) => event.name === "herdr:blocked");
+}
+
 async function setupTool(): Promise<RegisteredTool> {
    const { default: askUserExtension } = await import("./index");
    let registeredTool: RegisteredTool | undefined;
@@ -249,6 +259,162 @@ function createTheme() {
 }
 
 describe("ask_user", () => {
+   const originalHerdrEnv = {
+      HERDR_ENV: process.env.HERDR_ENV,
+      HERDR_SOCKET_PATH: process.env.HERDR_SOCKET_PATH,
+      HERDR_PANE_ID: process.env.HERDR_PANE_ID,
+   };
+   const clearHerdrEnv = () => {
+      delete process.env.HERDR_ENV;
+      delete process.env.HERDR_SOCKET_PATH;
+      delete process.env.HERDR_PANE_ID;
+   };
+
+   beforeAll(clearHerdrEnv);
+   afterAll(() => {
+      for (const [key, value] of Object.entries(originalHerdrEnv)) {
+         if (value === undefined) delete process.env[key];
+         else process.env[key] = value;
+      }
+   });
+
+   describe.serial("Herdr lifecycle", () => {
+      beforeEach(clearHerdrEnv);
+      afterEach(clearHerdrEnv);
+
+      test("emits no Herdr events outside a complete Herdr environment", async () => {
+         const tool = await setupTool();
+
+         await tool.execute(
+            "tool-call-id",
+            { question: "What should we do?" },
+            undefined,
+            undefined,
+            { hasUI: true, ui: { input: async () => "Proceed" } },
+         );
+
+         expect(herdrEvents()).toEqual([]);
+      });
+
+      test("marks no-options freeform waiting active then inactive", async () => {
+         enableHerdr();
+         const tool = await setupTool();
+
+         const result = await tool.execute(
+            "tool-call-id",
+            { question: "What should we do?" },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  input: async () => {
+                     expect(herdrEvents()).toEqual([
+                        { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+                     ]);
+                     return "Proceed";
+                  },
+               },
+            },
+         );
+
+         expect(result.details.response).toEqual({ kind: "freeform", text: "Proceed" });
+         expect(herdrEvents()).toEqual([
+            { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+            { name: "herdr:blocked", payload: { active: false, label: "ask_user" } },
+         ]);
+      });
+
+      test("marks option waiting active then inactive", async () => {
+         enableHerdr();
+         const tool = await setupTool();
+
+         const result = await tool.execute(
+            "tool-call-id",
+            { question: "Which option?", options: ["A", "B"] },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => {
+                     expect(herdrEvents()).toEqual([
+                        { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+                     ]);
+                     return { kind: "selection", selections: ["A"] };
+                  },
+               },
+            },
+         );
+
+         expect(result.details.response).toEqual({ kind: "selection", selections: ["A"] });
+         expect(herdrEvents()).toEqual([
+            { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+            { name: "herdr:blocked", payload: { active: false, label: "ask_user" } },
+         ]);
+      });
+
+      test("cleans up exactly once when option waiting is cancelled", async () => {
+         enableHerdr();
+         const tool = await setupTool();
+
+         const result = await tool.execute(
+            "tool-call-id",
+            { question: "Which option?", options: ["A", "B"] },
+            undefined,
+            undefined,
+            { hasUI: true, ui: { custom: async () => null } },
+         );
+
+         expect(result.details.cancelled).toBe(true);
+         expect(herdrEvents()).toEqual([
+            { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+            { name: "herdr:blocked", payload: { active: false, label: "ask_user" } },
+         ]);
+      });
+
+      test("cleans up exactly once when the option UI throws", async () => {
+         enableHerdr();
+         const tool = await setupTool();
+
+         const result = await tool.execute(
+            "tool-call-id",
+            { question: "Which option?", options: ["A", "B"] },
+            undefined,
+            undefined,
+            {
+               hasUI: true,
+               ui: {
+                  custom: async () => {
+                     throw new Error("UI exploded");
+                  },
+               },
+            },
+         );
+
+         expect(result.isError).toBe(true);
+         expect(herdrEvents()).toEqual([
+            { name: "herdr:blocked", payload: { active: true, label: "ask_user" } },
+            { name: "herdr:blocked", payload: { active: false, label: "ask_user" } },
+         ]);
+      });
+
+      test("does not mark Herdr blocked for preflight failures", async () => {
+         enableHerdr();
+         const tool = await setupTool();
+
+         await tool.execute(
+            "tool-call-id",
+            { question: "Which option?", options: [{}] },
+            undefined,
+            undefined,
+            { hasUI: true, ui: {} },
+         );
+
+         expect(herdrEvents()).toEqual([]);
+      });
+   });
+
    test("registers with executionMode 'sequential' so the agent loop awaits the user's answer before other tool calls run", async () => {
       const tool = await setupTool();
       expect((tool as any).executionMode).toBe("sequential");

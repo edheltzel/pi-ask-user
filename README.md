@@ -1,5 +1,7 @@
 # pi-ask-user
 
+This is an Atlas-maintained fork of [edlsh/pi-ask-user](https://github.com/edlsh/pi-ask-user). It preserves the upstream interaction and result contracts while adding optional Herdr lifecycle and metadata integration inspired by [leset0ng/pi-ask-herdr](https://github.com/leset0ng/pi-ask-herdr).
+
 A Pi package that adds an interactive `ask_user` tool for collecting user decisions during an agent run.
 
 ## Demo
@@ -24,6 +26,7 @@ High-quality video: [ask-user-demo.mp4](./media/ask-user-demo.mp4)
 - Optional timeout for auto-dismiss in both overlay and fallback input modes
 - Structured `details` on all results for session state reconstruction
 - Graceful fallback when interactive UI is unavailable
+- Optional Herdr blocked-state and pending-question metadata while waiting for input
 - Bundled `ask-user` skill for mandatory decision-gating in high-stakes or ambiguous tasks
 
 ## Bundled skill: `ask-user`
@@ -46,8 +49,20 @@ See: `skills/ask-user/references/ask-user-skill-extension-spec.md`.
 ## Install
 
 ```bash
-pi install npm:pi-ask-user
+pi install git:github.com/edheltzel/pi-ask-user@v0.13.0-herdr.1
 ```
+
+## Herdr integration
+
+Herdr integration activates automatically only when all three variables injected into a Herdr pane are present:
+
+- `HERDR_ENV=1`
+- `HERDR_SOCKET_PATH`
+- `HERDR_PANE_ID`
+
+While `ask_user` is waiting, the extension emits `herdr:blocked` with the `ask_user` label and reports one pending question as the metadata token `ask: "❓1"`. Every completed waiting path clears the blocked state and token. Socket communication uses short, bounded, newline-delimited JSON requests and is best-effort: unavailable or slow Herdr sockets never prevent the prompt from opening or fail the tool.
+
+Outside a complete Herdr environment, behavior is unchanged and no Herdr lifecycle events are emitted.
 
 ## Tool name
 

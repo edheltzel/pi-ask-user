@@ -30,6 +30,7 @@ import {
    truncateToWidth,
    wrapTextWithAnsi,
 } from "@earendil-works/pi-tui";
+import { beginHerdrWait } from "./herdr";
 import { renderSingleSelectRows, type QuestionOption } from "./single-select-layout";
 
 import { createRequire } from "node:module";
@@ -1968,7 +1969,13 @@ export default function(pi: ExtensionAPI) {
 
          if (options.length === 0) {
             const prompt = normalizedContext ? `${question}\n\nContext:\n${normalizedContext}` : question;
-            const answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+            const herdrWait = beginHerdrWait(pi.events);
+            let answer: string | undefined;
+            try {
+               answer = await ctx.ui.input(prompt, "Type your answer...", timeout ? { timeout } : undefined);
+            } finally {
+               await herdrWait?.finish();
+            }
             const response = createFreeformResponse(answer);
 
             if (!response) {
@@ -1994,6 +2001,7 @@ export default function(pi: ExtensionAPI) {
          let overlayHandle: OverlayHandle | undefined;
          let removeOverlayInputListener: (() => void) | undefined;
          let hasAnnouncedHide = false;
+         const herdrWait = beginHerdrWait(pi.events);
          try {
             const customFactory = (tui: TUI, theme: Theme, keybindings: KeybindingsManager, done: (result: AskUIResult | null) => void) => {
                if (signal) {
@@ -2066,6 +2074,7 @@ export default function(pi: ExtensionAPI) {
             };
          } finally {
             removeOverlayInputListener?.();
+            await herdrWait?.finish();
          }
 
          if (result === null) {
